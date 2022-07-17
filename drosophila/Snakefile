@@ -1,0 +1,165 @@
+## -----------------------------------------------------------------------------
+##  Simulate Drosophila data
+## -----------------------------------------------------------------------------
+## 
+## module load snakemake/7.8.3-foss-2020b
+## snakemake --cores 16 --use-envmodules -npr
+## 
+## To get the required data, first run 
+## snakemake --cores 1 get_data
+## 
+## -----------------------------------------------------------------------------
+
+## Modules (if software is installed without modules, just run snakemake without --use-envmodules)
+Rmod = "R-BioC/4.2-3.15-foss-2020b"
+Pandocmod = "Pandoc/2.10"
+RSEMmod = "RSEM/1.3.3-foss-2019b"
+bowtie2mod = "Bowtie2/2.3.5.1-GCC-8.3.0"
+Rbin = "R CMD BATCH --no-restore --no-save"
+
+## -----------------------------------------------------------------------------
+##  Default rule
+## -----------------------------------------------------------------------------
+rule all:
+    input:
+        "Rout/prepare_expanded_reference_files.Rout",
+        "reference/rsem_reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.rev.2.bt2",
+        "reference/rsem_model/SRR1501444.stat/SRR1501444.model",
+        "reference/rsem_model/SRR1501444.stat/SRR1501444.highQ.model",
+        expand("Rout/generate_rsem_files_de{nde}.Rout", nde=["0","1000"]),
+        expand("de{nde}/{simtype}_simulation/1_reads/reads/sample{i}/sample{i}_1.fq", nde=["0","1000"], simtype=["null","non_null"], i=["1","2","3","4","5","6"])
+
+## -----------------------------------------------------------------------------
+##  Download data
+## -----------------------------------------------------------------------------
+rule get_data:
+    shell:
+        '''
+        wget -P fastq ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR150/004/SRR1501444/SRR1501444_1.fastq.gz
+        wget -P fastq ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR150/004/SRR1501444/SRR1501444_2.fastq.gz
+        wget -P reference ftp://ftp.ensembl.org/pub/release-70/fasta/drosophila_melanogaster/dna/Drosophila_melanogaster.BDGP5.70.dna.toplevel.fa.gz
+        wget -P reference ftp://ftp.ensembl.org/pub/release-70/gtf/drosophila_melanogaster/Drosophila_melanogaster.BDGP5.70.gtf.gz
+        gunzip reference/Drosophila_melanogaster.BDGP5.70.gtf.gz
+        gunzip reference/Drosophila_melanogaster.BDGP5.70.dna.toplevel.fa.gz
+        grep "protein_coding" reference/Drosophila_melanogaster.BDGP5.70.gtf > reference/Drosophila_melanogaster.BDGP5.70.protein_coding.gtf
+        '''
+
+rule prepare_reference_files:
+    input:
+        genome = "reference/Drosophila_melanogaster.BDGP5.70.dna.toplevel.fa",
+        gtf = "reference/Drosophila_melanogaster.BDGP5.70.protein_coding.gtf",
+        script = "../scripts/prepare_expanded_reference_files.R"
+    output:
+        "reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.tx2gene.tsv",
+        "reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.transcripts.fa",
+        "reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.gtf",
+        rout = "Rout/prepare_expanded_reference_files.Rout"
+    params:
+        outdir = lambda wildcards, output: os.path.dirname(output[0])
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args genome='{input.genome}' gtf='{input.gtf}' outdir='{params.outdir}'" {input.script} {output.rout}
+        '''
+
+rule prepare_rsem_reference:
+    input:
+        genome = "reference/Drosophila_melanogaster.BDGP5.70.dna.toplevel.fa",
+        gtf = "reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.gtf"
+    output:
+        "reference/rsem_reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.rev.2.bt2"
+    params:
+        refname = lambda wildcards, output: output[0].replace(".rev.2.bt2", "")
+    envmodules:
+        f"{RSEMmod}",
+        f"{bowtie2mod}"
+    shell:
+        '''
+        rsem-prepare-reference --gtf {input.gtf} --bowtie2 {input.genome} {params.refname}
+        '''
+
+rule estimate_rsem_modelfile:
+    input:
+        r1 = "fastq/SRR1501444_1.fastq.gz",
+        r2 = "fastq/SRR1501444_2.fastq.gz",
+        index = "reference/rsem_reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.rev.2.bt2"
+    output:
+        log = "reference/rsem_model/SRR1501444.log",
+        modelFile = "reference/rsem_model/SRR1501444.stat/SRR1501444.model",
+        isoformResultsFile = "reference/rsem_model/SRR1501444.isoforms.results"
+    params:
+        index = lambda wildcards, input: input["index"].replace(".rev.2.bt2", ""),
+        outprefix = lambda wildcards, output: output["log"].replace(".log", "")
+    threads:
+        16
+    envmodules:
+        f"{RSEMmod}",
+        f"{bowtie2mod}"
+    shell:
+        '''
+        rsem-calculate-expression --paired-end --bowtie2 -p {threads} --seed 123 {input.r1} {input.r2} \
+        {params.index} {params.outprefix}
+        '''
+
+rule fix_rsem_modelfile:
+    input:
+        modelFile = "reference/rsem_model/SRR1501444.stat/SRR1501444.model",
+        script = "../scripts/fix_rsem_model_file.R"
+    output:
+        modelFile = "reference/rsem_model/SRR1501444.stat/SRR1501444.highQ.model",
+        rout = "Rout/fix_rsem_modelfile.Rout"
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args inputFile='{input.modelFile}' outputFile='{output.modelFile}'" {input.script} {output.rout}
+        '''
+
+rule estimate_simulation_parameters_node:
+    input:
+        isoformResultsFile = "reference/rsem_model/SRR1501444.isoforms.results",
+        script = "../scripts/generate_rsem_files.R"
+    output:
+        expand("de{{nde}}/non_null_simulation/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
+        expand("de{{nde}}/null_simulation/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
+        "de{nde}/non_null_simulation/3_truth/simulation_details.txt",
+        "de{nde}/null_simulation/3_truth/simulation_details.txt",
+        rout = "Rout/generate_rsem_files_de{nde}.Rout"
+    params:
+        seed = 123,
+        nbrPerGroup = 3,
+        meanDispFile = "reference/Pickrell.Cheung.Mu.Phi.Estimates.rds",
+        outdirBase = lambda wildcards: "de" + wildcards.nde,
+        librarySize = 25000000,
+        nbrDiffSpliced = 1000,
+        nbrDiffExpr = lambda wildcards: wildcards.nde
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args seed={params.seed} isoform_results_file='{input.isoformResultsFile}' nbr_per_group={params.nbrPerGroup} mean_disp_file='{params.meanDispFile}' outdir_base='{params.outdirBase}' library_size={params.librarySize} nbr_diff_spliced={params.nbrDiffSpliced} nbr_diff_expr={params.nbrDiffExpr}" {input.script} {output.rout}
+        '''
+
+rule simulate_reads:
+    input:
+        isoformResultsFile = "{simtype}/1_reads/rsem_files/sample{i}.txt",
+        index = "reference/rsem_reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.rev.2.bt2",
+        modelFile = "reference/rsem_model/SRR1501444.stat/SRR1501444.highQ.model",
+    output:
+        "{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq",
+        "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq"
+    params:
+        index = lambda wildcards, input: input["index"].replace(".rev.2.bt2", ""),
+        librarySize = 25000000,
+        outdirBase = lambda wildcards, output: output[0].replace("_1.fq", ""),
+        theta0 = 0.05,
+        seed = 123
+    envmodules:
+        f"{RSEMmod}",
+        f"{bowtie2mod}"
+    shell:
+        '''
+        rsem-simulate-reads {params.index} {input.modelFile} {input.isoformResultsFile} \
+        {params.theta0} {params.librarySize} {params.outdirBase} --seed {params.seed}
+        '''
