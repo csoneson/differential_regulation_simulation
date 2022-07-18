@@ -18,6 +18,11 @@ bowtie2mod = "Bowtie2/2.3.5.1-GCC-8.3.0"
 Rbin = "R CMD BATCH --no-restore --no-save"
 
 ## -----------------------------------------------------------------------------
+## Enumerate simulations to do
+## -----------------------------------------------------------------------------
+sims = ["de0_ds0_dr0", "de0_ds0_dr1000", "de1000_ds1000_dr0", "de1000_ds1000_dr1000"]
+
+## -----------------------------------------------------------------------------
 ##  Default rule
 ## -----------------------------------------------------------------------------
 rule all:
@@ -26,8 +31,9 @@ rule all:
         "reference/rsem_reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.rev.2.bt2",
         "reference/rsem_model/SRR1501444.stat/SRR1501444.model",
         "reference/rsem_model/SRR1501444.stat/SRR1501444.highQ.model",
-        expand("Rout/generate_rsem_files_de{nde}.Rout", nde=["0","1000"]),
-        expand("de{nde}/{simtype}_simulation/1_reads/reads/sample{i}/sample{i}_1.fq", nde=["0","1000"], simtype=["null","non_null"], i=["1","2","3","4","5","6"])
+        expand("Rout/generate_rsem_files_{simtype}.Rout", simtype = sims),
+        #"de0_ds0_dr0/1_reads/reads/sample1/sample1_1.fq.gz"
+        #expand("{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz", simtype = sims, i=["1","2","3","4","5","6"])
 
 ## -----------------------------------------------------------------------------
 ##  Download data
@@ -116,29 +122,28 @@ rule fix_rsem_modelfile:
         {Rbin} "--args inputFile='{input.modelFile}' outputFile='{output.modelFile}'" {input.script} {output.rout}
         '''
 
-rule estimate_simulation_parameters_node:
+rule estimate_simulation_parameters:
     input:
         isoformResultsFile = "reference/rsem_model/SRR1501444.isoforms.results",
         script = "../scripts/generate_rsem_files.R"
     output:
-        expand("de{{nde}}/non_null_simulation/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
-        expand("de{{nde}}/null_simulation/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
-        "de{nde}/non_null_simulation/3_truth/simulation_details.txt",
-        "de{nde}/null_simulation/3_truth/simulation_details.txt",
-        rout = "Rout/generate_rsem_files_de{nde}.Rout"
+        expand("de{{nde}}_ds{{nds}}_dr{{ndr}}/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
+        "de{nde}_ds{nds}_dr{ndr}/3_truth/simulation_details.txt",
+        rout = "Rout/generate_rsem_files_de{nde}_ds{nds}_dr{ndr}.Rout"
     params:
         seed = 123,
         nbrPerGroup = 3,
         meanDispFile = "reference/Pickrell.Cheung.Mu.Phi.Estimates.rds",
-        outdirBase = lambda wildcards: "de" + wildcards.nde,
+        outdirBase = lambda wildcards: "de" + wildcards.nde + "_ds" + wildcards.nds + "_dr" + wildcards.ndr,
         librarySize = 25000000,
-        nbrDiffSpliced = 1000,
+        nbrDiffReg = lambda wildcards: wildcards.ndr,
+        nbrDiffSpliced = lambda wildcards: wildcards.nds,
         nbrDiffExpr = lambda wildcards: wildcards.nde
     envmodules:
         f"{Rmod}"
     shell:
         '''
-        {Rbin} "--args seed={params.seed} isoform_results_file='{input.isoformResultsFile}' nbr_per_group={params.nbrPerGroup} mean_disp_file='{params.meanDispFile}' outdir_base='{params.outdirBase}' library_size={params.librarySize} nbr_diff_spliced={params.nbrDiffSpliced} nbr_diff_expr={params.nbrDiffExpr}" {input.script} {output.rout}
+        {Rbin} "--args seed={params.seed} isoform_results_file='{input.isoformResultsFile}' nbr_per_group={params.nbrPerGroup} mean_disp_file='{params.meanDispFile}' outdir_base='{params.outdirBase}' library_size={params.librarySize} nbr_diff_reg={params.nbrDiffReg} nbr_diff_spliced={params.nbrDiffSpliced} nbr_diff_expr={params.nbrDiffExpr}" {input.script} {output.rout}
         '''
 
 rule simulate_reads:
@@ -147,8 +152,8 @@ rule simulate_reads:
         index = "reference/rsem_reference/Drosophila_melanogaster.BDGP5.70.protein_coding.expanded.rev.2.bt2",
         modelFile = "reference/rsem_model/SRR1501444.stat/SRR1501444.highQ.model",
     output:
-        "{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq",
-        "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq"
+        "{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz",
+        "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq.gz"
     params:
         index = lambda wildcards, input: input["index"].replace(".rev.2.bt2", ""),
         librarySize = 25000000,
@@ -161,5 +166,7 @@ rule simulate_reads:
     shell:
         '''
         rsem-simulate-reads {params.index} {input.modelFile} {input.isoformResultsFile} \
-        {params.theta0} {params.librarySize} {params.outdirBase} --seed {params.seed}
+        {params.theta0} {params.librarySize} {params.outdirBase} --seed {params.seed} && \
+        gzip {params.outdirBase}_1.fq && \
+        gzip {params.outdirBase}_2.fq
         '''

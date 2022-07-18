@@ -69,6 +69,15 @@ In .get_cds_IDX(mcols0$type, mcols0$phase) :
 > grl <- grl[tx_to_keep]
 > seqs <- seqs[tx_to_keep]
 > 
+> ## Additionally remove the few unspliced transcripts where the spliced 
+> ## variant has been removed
+> (only_unspliced <- paste0(setdiff(gsub("-U", "", names(seqs)), names(seqs)), "-U"))
+[1] "FBtr0302280-U" "FBtr0302281-U" "FBtr0300975-U" "FBtr0089800-U"
+[5] "FBtr0300093-U" "FBtr0089464-U"
+> tx_to_keep <- names(seqs)[!(names(seqs) %in% only_unspliced)]
+> grl <- grl[tx_to_keep]
+> seqs <- seqs[tx_to_keep]
+> 
 > stopifnot(all(!duplicated(seqs)))
 > 
 > ## We don't want to quantify spliced and unspliced sequences as different genes - 
@@ -105,7 +114,7 @@ In .get_cds_IDX(mcols0$type, mcols0$phase) :
 + )
 > 
 > date()
-[1] "Fri Jul 15 15:44:09 2022"
+[1] "Mon Jul 18 11:39:49 2022"
 > sessionInfo()
 R version 4.2.1 (2022-06-23)
 Platform: x86_64-pc-linux-gnu (64-bit)
@@ -172,4 +181,4 @@ loaded via a namespace (and not attached):
 > 
 > proc.time()
    user  system elapsed 
- 31.653   2.054  33.721 
+ 33.120   2.660  35.814 

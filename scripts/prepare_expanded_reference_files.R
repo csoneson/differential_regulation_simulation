@@ -37,6 +37,13 @@ tx_to_keep <- names(seqs)[which(!duplicated(seqs))]
 grl <- grl[tx_to_keep]
 seqs <- seqs[tx_to_keep]
 
+## Additionally remove the few unspliced transcripts where the spliced 
+## variant has been removed
+(only_unspliced <- paste0(setdiff(gsub("-U", "", names(seqs)), names(seqs)), "-U"))
+tx_to_keep <- names(seqs)[!(names(seqs) %in% only_unspliced)]
+grl <- grl[tx_to_keep]
+seqs <- seqs[tx_to_keep]
+
 stopifnot(all(!duplicated(seqs)))
 
 ## We don't want to quantify spliced and unspliced sequences as different genes - 

@@ -59,7 +59,7 @@ Type 'q()' to quit R.
 > writeLines(inp, con = outputFile)
 > 
 > date()
-[1] "Sat Jul 16 16:23:38 2022"
+[1] "Mon Jul 18 13:01:47 2022"
 > sessionInfo()
 R version 4.2.1 (2022-06-23)
 Platform: x86_64-pc-linux-gnu (64-bit)
@@ -84,4 +84,4 @@ loaded via a namespace (and not attached):
 > 
 > proc.time()
    user  system elapsed 
-  0.203   0.212   0.351 
+  0.213   0.391   0.378 
