@@ -139,24 +139,43 @@ if (nbr_diff_spliced > 0) {
     isoform_summary_nonds <- isoform_summary[!(isoform_summary$gene_id %in% ds_genes), ]
     isoform_summary_ds <- isoform_summary[isoform_summary$gene_id %in% ds_genes, ]
     
+    ## Helper function to modify isoform percentages
     mutate_IsoPct <- function(w, txid, getpctfrom) {
         ## w is a vector of isoform proportions
         ## txid is a vector of transcript IDs
-        ## getpctfrom is a vector of transcript IDs to get isoform pct from
+        ## getpctfrom is a vector of transcript IDs to get new isoform pct from
+        
+        ## Find spliced transcript IDs
         spl <- txid[which(!grepl("-U", txid))]
+        
+        ## Get isoform percentages for spliced transcripts and corresponding 
+        ## unspliced ones
         wspl <- w[match(spl, txid)]
         wuspl <- w[match(paste0(spl, "-U"), txid)]
+        
+        ## Calucate fraction of total isoform percentage that comes from the 
+        ## spliced variant
         wtot <- rowSums(cbind(wspl, wuspl), na.rm = TRUE)
         relspl <- wspl/wtot
+        
+        ## Assign new total isoform percentage to transcripts
         wspl <- wtot[match(getpctfrom[match(spl, txid)], spl)]
+        
+        ## Split total isoform percentage between spliced and unspliced variant
         wuspl <- (1 - relspl) * wspl
         wspl <- relspl * wspl
+        
+        ## Return vector of new isoform percentages, in the same order as 
+        ## the input
         names(wspl) <- spl
         names(wuspl) <- paste0(spl, "-U")
         wall <- c(wspl, wuspl)[txid]
+        
         wall
     }
     
+    ## Isoform percentages will be shuffled between transcripts - need to 
+    ## make sure the shuffling is the same for all samples.
     get_shuffling <- function(txid) {
         splidx <- !grepl("-U", txid)
         tgt <- sample(txid[splidx], sum(splidx))
