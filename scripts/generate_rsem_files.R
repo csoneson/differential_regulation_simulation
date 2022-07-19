@@ -129,8 +129,7 @@ for (i in 1:(2 * nbr_per_group)) {
 ## Introduce differential splicing (change the s*_IsoPct for the samples in group 2)
 ## -----------------------------------------------------------------------------
 if (nbr_diff_spliced > 0) {
-    ## Extract genes with at least 2 isoforms and at least 500 expected counts per million
-    ## in the RSEM data, and at least two isoforms
+    ## Extract genes with at least 2 isoforms and expected count > 500
     message("Introducing differential splicing...")
     ds_genes <- 
         gene_summary$gene_id[sample(intersect(which(gene_summary$nbr_isoforms >= 2),
@@ -153,7 +152,7 @@ if (nbr_diff_spliced > 0) {
         wspl <- w[match(spl, txid)]
         wuspl <- w[match(paste0(spl, "-U"), txid)]
         
-        ## Calucate fraction of total isoform percentage that comes from the 
+        ## Calculate fraction of total isoform percentage that comes from the 
         ## spliced variant
         wtot <- rowSums(cbind(wspl, wuspl), na.rm = TRUE)
         relspl <- wspl/wtot
@@ -204,7 +203,7 @@ if (nbr_diff_spliced > 0) {
 ## isoforms for the samples in group 2)
 ## -----------------------------------------------------------------------------
 if (nbr_diff_reg > 0) {
-    ## Extract genes with at least 1 unspliced isoform
+    ## Extract genes with at least 1 unspliced isoform and expected count > 500
     message("Introducing differential regulation...")
     dr_genes <- 
         gene_summary$gene_id[sample(intersect(which(gene_summary$nbr_unspliced_isoforms >= 1),
