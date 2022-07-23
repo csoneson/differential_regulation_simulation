@@ -1,0 +1,199 @@
+## -----------------------------------------------------------------------------
+##  Simulate Human data
+## -----------------------------------------------------------------------------
+## 
+## Software requirements:
+## RSEM
+## bowtie2
+## R
+## R packages: gtools, dplyr, eisaR, Biostrings, GenomicFeatures, BSgenome
+## 
+## To download the required data, first run 
+## snakemake --cores 1 get_data
+## 
+## Then, to run the simulations:
+## snakemake --cores 16 --use-envmodules -npr
+## If software is managed via a module system, edit module names below
+## If software is not managed via modules, remove --use-envmodules from the command
+## 
+## -----------------------------------------------------------------------------
+
+## Modules 
+Rmod = "R-BioC/4.2-3.15-foss-2020b"
+Pandocmod = "Pandoc/2.10"
+RSEMmod = "RSEM/1.3.3-foss-2019b"
+bowtie2mod = "Bowtie2/2.3.5.1-GCC-8.3.0"
+Rbin = "R CMD BATCH --no-restore --no-save"
+
+## -----------------------------------------------------------------------------
+## Enumerate simulations to do
+## Format: de{nde}_ds{nds}_dr{ndr}, where {nde}, {nds}, {ndr} are the number of 
+## genes affected by differential expression/splicing/regulation, respectively
+## -----------------------------------------------------------------------------
+#sims = ["de0_ds0_dr0", "de0_ds0_dr1000", "de1000_ds1000_dr0", "de1000_ds1000_dr1000"]
+sims = ["de0_ds0_dr1000"]
+
+## -----------------------------------------------------------------------------
+##  Default rule
+## -----------------------------------------------------------------------------
+rule all:
+    input:
+        "Rout/prepare_expanded_reference_files.Rout",
+        "reference/rsem_reference/gencode.v41.annotation.protein_coding.expanded.rev.2.bt2l",
+        "reference/rsem_model/SRR493366.stat/SRR493366.model",
+        "reference/rsem_model/SRR493366.stat/SRR493366.highQ.model",
+        expand("Rout/generate_rsem_files_{simtype}.Rout", simtype = sims),
+        expand("{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz", simtype = sims, i=["1","2","3","4","5","6"])
+
+## -----------------------------------------------------------------------------
+##  Download data
+## -----------------------------------------------------------------------------
+rule get_data:
+    shell:
+        '''
+        wget -P fastq ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR493/SRR493366/SRR493366_1.fastq.gz
+        wget -P fastq ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR493/SRR493366/SRR493366_2.fastq.gz
+        wget -P reference https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_41/GRCh38.primary_assembly.genome.fa.gz
+        wget -P reference https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_41/gencode.v41.annotation.gtf.gz
+        gunzip reference/gencode.v41.annotation.gtf.gz
+        gunzip reference/GRCh38.primary_assembly.genome.fa.gz
+        grep "protein_coding" reference/gencode.v41.annotation.gtf > reference/gencode.v41.annotation.protein_coding.gtf
+        '''
+
+## -----------------------------------------------------------------------------
+##  Prepare "expanded" reference files
+## -----------------------------------------------------------------------------
+rule prepare_reference_files:
+    input:
+        genome = "reference/GRCh38.primary_assembly.genome.fa",
+        gtf = "reference/gencode.v41.annotation.protein_coding.gtf",
+        script = "../scripts/prepare_expanded_reference_files.R"
+    output:
+        "reference/gencode.v41.annotation.protein_coding.expanded.tx2gene.tsv",
+        "reference/gencode.v41.annotation.protein_coding.expanded.transcripts.fa",
+        "reference/gencode.v41.annotation.protein_coding.expanded.gtf",
+        rout = "Rout/prepare_expanded_reference_files.Rout"
+    params:
+        outdir = lambda wildcards, output: os.path.dirname(output[0])
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args genome='{input.genome}' gtf='{input.gtf}' outdir='{params.outdir}'" {input.script} {output.rout}
+        '''
+
+## -----------------------------------------------------------------------------
+##  Build RSEM index
+## -----------------------------------------------------------------------------
+rule prepare_rsem_reference:
+    input:
+        genome = "reference/GRCh38.primary_assembly.genome.fa",
+        gtf = "reference/gencode.v41.annotation.protein_coding.expanded.gtf"
+    output:
+        "reference/rsem_reference/gencode.v41.annotation.protein_coding.expanded.rev.2.bt2l"
+    params:
+        refname = lambda wildcards, output: output[0].replace(".rev.2.bt2l", "")
+    envmodules:
+        f"{RSEMmod}",
+        f"{bowtie2mod}"
+    shell:
+        '''
+        rsem-prepare-reference --gtf {input.gtf} --bowtie2 {input.genome} {params.refname}
+        '''
+
+## -----------------------------------------------------------------------------
+##  Estimate RSEM model file
+## -----------------------------------------------------------------------------
+rule estimate_rsem_modelfile:
+    input:
+        r1 = "fastq/SRR493366_1.fastq.gz",
+        r2 = "fastq/SRR493366_2.fastq.gz",
+        index = "reference/rsem_reference/gencode.v41.annotation.protein_coding.expanded.rev.2.bt2l"
+    output:
+        log = "reference/rsem_model/SRR493366.log",
+        modelFile = "reference/rsem_model/SRR493366.stat/SRR493366.model",
+        isoformResultsFile = "reference/rsem_model/SRR493366.isoforms.results"
+    params:
+        index = lambda wildcards, input: input["index"].replace(".rev.2.bt2l", ""),
+        outprefix = lambda wildcards, output: output["log"].replace(".log", "")
+    threads:
+        32
+    envmodules:
+        f"{RSEMmod}",
+        f"{bowtie2mod}"
+    shell:
+        '''
+        rsem-calculate-expression --paired-end --bowtie2 -p {threads} --seed 123 {input.r1} {input.r2} \
+        {params.index} {params.outprefix}
+        '''
+
+## 'Fix' model file as was done in Soneson & Matthes et al (2016), to avoid long stretches of low 
+## quality bases in the simulated data
+rule fix_rsem_modelfile:
+    input:
+        modelFile = "reference/rsem_model/SRR493366.stat/SRR493366.model",
+        script = "../scripts/fix_rsem_model_file.R"
+    output:
+        modelFile = "reference/rsem_model/SRR493366.stat/SRR493366.highQ.model",
+        rout = "Rout/fix_rsem_modelfile.Rout"
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args inputFile='{input.modelFile}' outputFile='{output.modelFile}'" {input.script} {output.rout}
+        '''
+
+## -----------------------------------------------------------------------------
+##  Generate simulation files
+## -----------------------------------------------------------------------------
+rule generate_simulation_parameters:
+    input:
+        isoformResultsFile = "reference/rsem_model/SRR493366.isoforms.results",
+        script = "../scripts/generate_rsem_files.R"
+    output:
+        expand("de{{nde}}_ds{{nds}}_dr{{ndr}}/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
+        "de{nde}_ds{nds}_dr{ndr}/3_truth/simulation_details.txt",
+        rout = "Rout/generate_rsem_files_de{nde}_ds{nds}_dr{ndr}.Rout"
+    params:
+        seed = 123,
+        nbrPerGroup = 3,
+        meanDispFile = "reference/Pickrell.Cheung.Mu.Phi.Estimates.rds",
+        outdirBase = lambda wildcards: "de" + wildcards.nde + "_ds" + wildcards.nds + "_dr" + wildcards.ndr,
+        librarySize = 40000000,
+        nbrDiffReg = lambda wildcards: wildcards.ndr,
+        nbrDiffSpliced = lambda wildcards: wildcards.nds,
+        nbrDiffExpr = lambda wildcards: wildcards.nde
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args seed={params.seed} isoform_results_file='{input.isoformResultsFile}' nbr_per_group={params.nbrPerGroup} mean_disp_file='{params.meanDispFile}' outdir_base='{params.outdirBase}' library_size={params.librarySize} nbr_diff_reg={params.nbrDiffReg} nbr_diff_spliced={params.nbrDiffSpliced} nbr_diff_expr={params.nbrDiffExpr}" {input.script} {output.rout}
+        '''
+
+## -----------------------------------------------------------------------------
+##  Simulate fastq files
+## -----------------------------------------------------------------------------
+rule simulate_reads:
+    input:
+        isoformResultsFile = "{simtype}/1_reads/rsem_files/sample{i}.txt",
+        index = "reference/rsem_reference/gencode.v41.annotation.protein_coding.expanded.rev.2.bt2l",
+        modelFile = "reference/rsem_model/SRR493366.stat/SRR493366.highQ.model",
+    output:
+        "{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz",
+        "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq.gz"
+    params:
+        index = lambda wildcards, input: input["index"].replace(".rev.2.bt2l", ""),
+        librarySize = 40000000,
+        outdirBase = lambda wildcards, output: output[0].replace("_1.fq.gz", ""),
+        theta0 = 0.05,
+        seed = 123
+    envmodules:
+        f"{RSEMmod}",
+        f"{bowtie2mod}"
+    shell:
+        '''
+        rsem-simulate-reads {params.index} {input.modelFile} {input.isoformResultsFile} \
+        {params.theta0} {params.librarySize} {params.outdirBase} --seed {params.seed} && \
+        gzip {params.outdirBase}_1.fq && \
+        gzip {params.outdirBase}_2.fq
+        '''

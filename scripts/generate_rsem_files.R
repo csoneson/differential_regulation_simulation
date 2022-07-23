@@ -50,7 +50,11 @@ gene_summary <- isoform.initial %>% group_by(gene_id) %>%
               nbr_isoforms = length(IsoPct[!grepl("-U", transcript_id)]),
               nbr_unspliced_isoforms = length(IsoPct[grepl("-U", transcript_id)]), 
               nbr_expr_isoforms = length(which(IsoPct[!grepl("-U", transcript_id)] > 0)),
-              nbr_expr_isoforms10 = length(which(IsoPct[!grepl("-U", transcript_id)] > 10)))
+              nbr_expr_isoforms10 = length(which(IsoPct[!grepl("-U", transcript_id)] > 10)),
+              sum_isopct_spliced_spliceable = sum(IsoPct[!grepl("-U", transcript_id) & 
+                                                             (paste0(transcript_id, "-U") %in% 
+                                                                  transcript_id)]),
+              sum_isopct_unspliced = sum(IsoPct[grepl("-U", transcript_id)]))
 
 ## -----------------------------------------------------------------------------
 ## Introduce differential expression
@@ -75,9 +79,9 @@ if (nbr_diff_expr > 0) {
 ## the right dispersion estimates.
 ## Also calculate gene RPKs (proportional to TPMs)
 ## -----------------------------------------------------------------------------
-gene_summary$expected_gene_count_gr1 <- gene_summary$expected_gene_count_gr1/
+gene_summary$expected_gene_count_gr1 <- gene_summary$expected_gene_count_gr1 /
     sum(gene_summary$expected_gene_count_gr1) * library_size
-gene_summary$expected_gene_count_gr2 <- gene_summary$expected_gene_count_gr2/
+gene_summary$expected_gene_count_gr2 <- gene_summary$expected_gene_count_gr2 /
     sum(gene_summary$expected_gene_count_gr2) * library_size
 
 gene_summary$dispersion_gr1 <- sapply(gene_summary$expected_gene_count_gr1, 
@@ -97,7 +101,7 @@ for (i in 1:nbr_per_group) {
                     mu = gene_summary$expected_gene_count_gr1[j])
         })
     gene_summary[, paste0("s", i, "_geneRPK")] <- 
-        gene_summary[, paste0("s", i, "_geneCount")]/
+        gene_summary[, paste0("s", i, "_geneCount")] /
         gene_summary$effective_gene_length * 1e3
 }
 for (i in (nbr_per_group + 1):(2 * nbr_per_group)) {
@@ -107,7 +111,7 @@ for (i in (nbr_per_group + 1):(2 * nbr_per_group)) {
                     mu = gene_summary$expected_gene_count_gr2[j])
         })
     gene_summary[, paste0("s", i, "_geneRPK")] <- 
-        gene_summary[, paste0("s", i, "_geneCount")]/
+        gene_summary[, paste0("s", i, "_geneCount")] /
         gene_summary$effective_gene_length * 1e3
 }
 
@@ -129,11 +133,11 @@ for (i in 1:(2 * nbr_per_group)) {
 ## Introduce differential splicing (change the s*_IsoPct for the samples in group 2)
 ## -----------------------------------------------------------------------------
 if (nbr_diff_spliced > 0) {
-    ## Extract genes with at least 2 isoforms and expected count > 500
+    ## Extract genes with at least 2 isoforms and expected count > 10
     message("Introducing differential splicing...")
     ds_genes <- 
         gene_summary$gene_id[sample(intersect(which(gene_summary$nbr_isoforms >= 2),
-                                              which(gene_summary$expected_gene_count_gr1 > 500)), 
+                                              which(gene_summary$expected_gene_count_gr1 > 10)), 
                                     nbr_diff_spliced, replace = FALSE)]
     isoform_summary_nonds <- isoform_summary[!(isoform_summary$gene_id %in% ds_genes), ]
     isoform_summary_ds <- isoform_summary[isoform_summary$gene_id %in% ds_genes, ]
@@ -178,6 +182,9 @@ if (nbr_diff_spliced > 0) {
     get_shuffling <- function(txid) {
         splidx <- !grepl("-U", txid)
         tgt <- sample(txid[splidx], sum(splidx))
+        while (all(tgt == txid[splidx])) {
+            tgt <- sample(txid[splidx], sum(splidx))
+        }
         map <- structure(rep(tgt, 2), names = c(txid[splidx], paste0(txid[splidx], "-U")))
         map[txid]
     }
@@ -203,12 +210,16 @@ if (nbr_diff_spliced > 0) {
 ## isoforms for the samples in group 2)
 ## -----------------------------------------------------------------------------
 if (nbr_diff_reg > 0) {
-    ## Extract genes with at least 1 unspliced isoform and expected count > 500
+    ## Extract genes with at least 1 unspliced isoform and expected count > 10
     message("Introducing differential regulation...")
     dr_genes <- 
-        gene_summary$gene_id[sample(intersect(which(gene_summary$nbr_unspliced_isoforms >= 1),
-                                              which(gene_summary$expected_gene_count_gr1 > 500)), 
-                                    nbr_diff_reg, replace = FALSE)]
+        gene_summary$gene_id[sample(
+            intersect(intersect(which(gene_summary$nbr_unspliced_isoforms >= 1),
+                                which(gene_summary$expected_gene_count_gr1 > 10)),
+                      which(abs(gene_summary$sum_isopct_spliced_spliceable/(gene_summary$sum_isopct_spliced_spliceable + 
+                                                                                gene_summary$sum_isopct_unspliced) - 0.5) > 0.1)
+            ), 
+            nbr_diff_reg, replace = FALSE)]
     isoform_summary_nondr <- isoform_summary[!(isoform_summary$gene_id %in% dr_genes), ]
     isoform_summary_dr <- isoform_summary[isoform_summary$gene_id %in% dr_genes, ]
     
@@ -251,7 +262,7 @@ for (i in 1:(2 * nbr_per_group)) {
 for (i in 1:(2 * nbr_per_group)) {
     final_summary[, paste0("s", i, "_isoformCount")] <- 
         final_summary[, paste0("s", i, "_isoformRPK")] * 
-        final_summary$effective_length/1000
+        final_summary$effective_length / 1000
 }
 
 for (i in 1:(2 * nbr_per_group)) {
@@ -265,6 +276,7 @@ final_summary[is.na(final_summary)] <- 0
 ## Scale each isoformTPM column so that it sums to 1 million
 idx <- grep("isoformTPM", colnames(final_summary))
 for (i in idx) {
+    final_summary[, i][!is.finite(final_summary[, i])] <- 0  ## happens when expected_count=0, TPM>0
     final_summary[, i] <- final_summary[, i]/sum(final_summary[, i]) * 1e6
 }
 
