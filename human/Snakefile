@@ -24,6 +24,7 @@ Pandocmod = "Pandoc/2.10"
 RSEMmod = "RSEM/1.3.3-foss-2019b"
 bowtie2mod = "Bowtie2/2.3.5.1-GCC-8.3.0"
 Salmonmod = "Salmon/1.6.0"
+STARmod = "STAR/2.7.9a-GCC-10.3.0"
 Rbin = "R CMD BATCH --no-restore --no-save"
 
 ## -----------------------------------------------------------------------------
@@ -46,7 +47,10 @@ rule all:
         expand("Rout/generate_rsem_files_{simtype}.Rout", simtype = sims),
         expand("{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz", simtype = sims, i = ["1","2","3","4","5","6"]),
         "reference/gencode.v41.annotation.protein_coding.expanded.k31.sidx/info.json",
-        expand("{simtype}/2_quants/salmon/sample{i}/quant.sf", simtype = sims, i = ["1","2","3","4","5","6"])
+        expand("{simtype}/2_quants/salmon/sample{i}/quant.sf", simtype = sims, i = ["1","2","3","4","5","6"]),
+        "reference/GRCh38.primary_assembly_gencode.v41.annotation.protein_coding.expanded.starindex/SA",
+        expand("{simtype}/2_quants/star/sample{i}/Aligned.toTranscriptome.out.bam", simtype = sims, i = ["1","2","3","4","5","6"]),
+        expand("{simtype}/2_quants/salmon_star/sample{i}/quant.sf", simtype = sims, i = ["1","2","3","4","5","6"]),
 
 ## -----------------------------------------------------------------------------
 ##  Download data
@@ -254,5 +258,69 @@ rule run_salmon:
     shell:
         '''
         salmon quant --index {params.idxdir} --libType A -1 {input.r1} -2 {input.r2} \
+        --threads {threads} --output {params.outdir} --dumpEq --numGibbsSamples 30
+        '''
+
+## -----------------------------------------------------------------------------
+## Build STAR index
+## -----------------------------------------------------------------------------
+rule star_index:
+    input:
+        genome = "reference/GRCh38.primary_assembly.genome.fa",
+        gtf = "reference/gencode.v41.annotation.protein_coding.expanded.gtf"
+    output: 
+        idx = "reference/GRCh38.primary_assembly_gencode.v41.annotation.protein_coding.expanded.starindex/SA"
+    params:
+        idxdir = lambda wildcards, output: os.path.dirname(output["idx"])
+    threads: 
+        16
+    envmodules:
+        f"{STARmod}"
+    shell:
+        '''
+        STAR --runMode genomeGenerate --runThreadN {threads} --genomeDir {params.idxdir}  \
+        --genomeFastaFiles {input.genome} --sjdbGTFfile {input.gtf} --sjdbOverhang 100
+        '''
+
+## -----------------------------------------------------------------------------
+## Align with STAR and quantify with Salmon
+## -----------------------------------------------------------------------------
+rule star_align:
+    input:
+        idx = "reference/GRCh38.primary_assembly_gencode.v41.annotation.protein_coding.expanded.starindex/SA",
+        r1 = "{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz",
+        r2 = "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq.gz"
+    output:
+        bam = "{simtype}/2_quants/star/sample{i}/Aligned.toTranscriptome.out.bam"
+    params:
+        idxdir = lambda wildcards, input: os.path.dirname(input["idx"]),
+        outprefix = lambda wildcards, output: os.path.dirname(output["bam"]) + "/"
+    threads: 
+        16
+    envmodules:
+        f"{STARmod}"
+    shell:
+        '''
+        STAR --runMode alignReads --runThreadN {threads} --genomeDir {params.idxdir} \
+		--readFilesCommand zcat --readFilesIn {input.r1} {input.r2} \
+		--outFileNamePrefix {params.outprefix} --outSAMtype BAM SortedByCoordinate \
+        --quantMode TranscriptomeSAM
+        '''
+
+rule run_salmon_on_alignments:
+    input:
+        txome = "reference/gencode.v41.annotation.protein_coding.expanded.transcripts.fa",
+        bam = "{simtype}/2_quants/star/sample{i}/Aligned.toTranscriptome.out.bam"
+    output:
+        quant = "{simtype}/2_quants/salmon_star/sample{i}/quant.sf"
+    params:
+        outdir = lambda wildcards, output: os.path.dirname(output["quant"])
+    threads:
+        16
+    envmodules:
+        f"{Salmonmod}"
+    shell:
+        '''
+        salmon quant -t {input.txome} --libType A -a {input.bam} \
         --threads {threads} --output {params.outdir} --dumpEq --numGibbsSamples 30
         '''
