@@ -33,8 +33,7 @@ Rbin = "R CMD BATCH --no-restore --no-save"
 ## Format: de{nde}_ds{nds}_dr{ndr}, where {nde}, {nds}, {ndr} are the number of 
 ## genes affected by differential expression/splicing/regulation, respectively
 ## -----------------------------------------------------------------------------
-#sims = ["de0_ds0_dr0", "de0_ds0_dr1000", "de1000_ds1000_dr0", "de1000_ds1000_dr1000"]
-sims = ["de0_ds0_dr1000"]
+sims = ["de0_ds0_dr0", "de0_ds0_dr2000", "de2000_ds0_dr2000", "de0_ds2000_dr2000"]
 
 ## -----------------------------------------------------------------------------
 ##  Default rule
