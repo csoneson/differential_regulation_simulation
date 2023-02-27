@@ -126,7 +126,7 @@ for (i in 1:(2 * nbr_per_group)) {
     isoform_summary <- isoform_summary %>% group_by(gene_id) %>% 
         mutate(IsoPctDirichlet = c(rdirichlet2(1, IsoPct/100 * 100))) %>%
         setNames(c(colnames(isoform_summary), paste0("s", i, "_IsoPct"))) %>%
-        ungroup()
+        dplyr::ungroup()
 }
 
 ## -----------------------------------------------------------------------------
@@ -195,14 +195,22 @@ if (nbr_diff_spliced > 0) {
                s5_IsoPct = mutate_IsoPct(s5_IsoPct, transcript_id, getIsoPctFrom),
                s6_IsoPct = mutate_IsoPct(s6_IsoPct, transcript_id, getIsoPctFrom),
                gene_ds_status = 1,
-               transcript_ds_status = as.numeric(sub("-U", "", transcript_id) != getIsoPctFrom))
+               transcript_ds_status = as.numeric(sub("-U", "", transcript_id) != getIsoPctFrom)) %>%
+        dplyr::ungroup()
     
     isoform_summary_nonds <- isoform_summary_nonds %>% group_by(gene_id) %>%
         mutate(getIsoPctFrom = sub("-U", "", transcript_id)) %>%
         mutate(gene_ds_status = 0,
-               transcript_ds_status = 0)
+               transcript_ds_status = 0) %>%
+        dplyr::ungroup()
     
-    isoform_summary <- rbind(isoform_summary_nonds, isoform_summary_ds)
+    isoform_summary <- dplyr::bind_rows(isoform_summary_nonds, isoform_summary_ds)
+} else {
+    isoform_summary <- isoform_summary %>% group_by(gene_id) %>%
+        mutate(getIsoPctFrom = sub("-U", "", transcript_id)) %>%
+        mutate(gene_ds_status = 0,
+               transcript_ds_status = 0) %>%
+        dplyr::ungroup()
 }
 
 ## -----------------------------------------------------------------------------
@@ -216,8 +224,9 @@ if (nbr_diff_reg > 0) {
         gene_summary$gene_id[sample(
             intersect(intersect(which(gene_summary$nbr_unspliced_isoforms >= 1),
                                 which(gene_summary$expected_gene_count_gr1 > 10)),
-                      which(abs(gene_summary$sum_isopct_spliced_spliceable/(gene_summary$sum_isopct_spliced_spliceable + 
-                                                                                gene_summary$sum_isopct_unspliced) - 0.5) > 0.1)
+                      which(abs(gene_summary$sum_isopct_spliced_spliceable / 
+                                    (gene_summary$sum_isopct_spliced_spliceable + 
+                                         gene_summary$sum_isopct_unspliced) - 0.5) > 0.1)
             ), 
             nbr_diff_reg, replace = FALSE)]
     isoform_summary_nondr <- isoform_summary[!(isoform_summary$gene_id %in% dr_genes), ]
@@ -238,13 +247,20 @@ if (nbr_diff_reg > 0) {
                s6_IsoPct = swap_IsoPct(s6_IsoPct, transcript_id),
                gene_dr_status = 1,
                transcript_dr_status = as.numeric(sub("-U-U", "-U", paste0(transcript_id, "-U")) %in%
-                                                     transcript_id))
+                                                     transcript_id)) %>%
+        dplyr::ungroup()
     
     isoform_summary_nondr <- isoform_summary_nondr %>% group_by(gene_id) %>%
-        mutate(gene_ds_status = 0,
-               transcript_ds_status = 0)
+        mutate(gene_dr_status = 0,
+               transcript_dr_status = 0) %>%
+        dplyr::ungroup()
     
-    isoform_summary <- rbind(isoform_summary_nondr, isoform_summary_dr)
+    isoform_summary <- dplyr::bind_rows(isoform_summary_nondr, isoform_summary_dr)
+} else {
+    isoform_summary <- isoform_summary %>% group_by(gene_id) %>%
+        mutate(gene_dr_status = 0,
+               transcript_dr_status = 0) %>%
+        dplyr::ungroup()
 }
 
 ## -----------------------------------------------------------------------------
