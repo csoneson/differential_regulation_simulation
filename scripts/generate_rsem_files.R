@@ -54,7 +54,8 @@ gene_summary <- isoform.initial %>% group_by(gene_id) %>%
               sum_isopct_spliced_spliceable = sum(IsoPct[!grepl("-U", transcript_id) & 
                                                              (paste0(transcript_id, "-U") %in% 
                                                                   transcript_id)]),
-              sum_isopct_unspliced = sum(IsoPct[grepl("-U", transcript_id)]))
+              sum_isopct_unspliced = sum(IsoPct[grepl("-U", transcript_id)])) %>%
+    dplyr::ungroup()
 
 ## -----------------------------------------------------------------------------
 ## Introduce differential expression
