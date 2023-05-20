@@ -52,7 +52,11 @@ rule all:
         expand("{simtype}/2_quants/star/sample{i}/Aligned.toTranscriptome.out.bam", simtype = sims, i = ["1","2","3","4","5","6"]),
         expand("{simtype}/2_quants/salmon_star/sample{i}/quant.sf", simtype = sims, i = ["1","2","3","4","5","6"]),
         expand("{simtype}/2_quants/kallisto_quant/sample{i}/abundance.tsv", simtype = sims, i = ["1","2","3","4","5","6"]),
-        expand("{simtype}/2_quants/kallisto_pseudo/sample{i}/pseudoalignments.tsv", simtype = sims, i = ["1","2","3","4","5","6"])
+        expand("{simtype}/2_quants/kallisto_pseudo/sample{i}/pseudoalignments.tsv", simtype = sims, i = ["1","2","3","4","5","6"]),
+        ## Generate small example data set
+        "reference/gencode.v41.annotation.protein_coding.expanded.transcripts_chr22_1_35000000.fa",
+        "reference/gencode.v41.annotation.protein_coding.expanded_chr22_1_35000000.k31.sidx/info.json",
+        expand("{simtype}/2_quants/salmon_chr22_1_35000000/sample{i}/quant.sf", simtype = ["de0_ds0_dr2000"], i = ["1","2","3","4","5","6"]),
 
 ## -----------------------------------------------------------------------------
 ##  Download data
@@ -220,14 +224,13 @@ rule get_chrnames:
         grep ">" {input.genome} | cut -d ">" -f 2 | cut -d " " -f 1 > {output}
         '''
 
-
 rule build_salmon_index:
     input:
-        txome = "reference/gencode.v41.annotation.protein_coding.expanded.transcripts.fa",
-        genome = "reference/GRCh38.primary_assembly.genome.fa",
-        chrnames = "reference/GRCh38.primary_assembly.chromosome_names.txt"
+        txome = "reference/gencode.v41.annotation.protein_coding.expanded.transcripts{chr}.fa",
+        genome = "reference/GRCh38.primary_assembly.genome{chr}.fa",
+        chrnames = "reference/GRCh38.primary_assembly.chromosome_names{chr}.txt"
     output:
-        idx = "reference/gencode.v41.annotation.protein_coding.expanded.k31.sidx/info.json"
+        idx = "reference/gencode.v41.annotation.protein_coding.expanded{chr,.*}.k31.sidx/info.json"
     params:
         idxdir = lambda wildcards, output: os.path.dirname(output["idx"])
     threads:
@@ -240,6 +243,30 @@ rule build_salmon_index:
         -i {params.idxdir} --gencode -p {threads} -d {input.chrnames}
 		'''
 
+## Subset annotation to only chr22 to create a small example data set
+## Potentially, could also subset the fastq files (we know from where all reads come)
+rule subset_genome_txome:
+    input:
+        txome = "reference/gencode.v41.annotation.protein_coding.expanded.transcripts.fa",
+        genome = "reference/GRCh38.primary_assembly.genome.fa",
+        gtf = "reference/gencode.v41.annotation.protein_coding.expanded.gtf",
+        script = "../scripts/subset_genome_txome.R"
+    output:
+        txome = "reference/gencode.v41.annotation.protein_coding.expanded.transcripts_{chr}.fa",
+        genome = "reference/GRCh38.primary_assembly.genome_{chr}.fa",
+        chrnames = "reference/GRCh38.primary_assembly.chromosome_names_{chr}.txt"
+    params:
+        coordkeep = "{chr}",
+        rout = "Rout/subset_genome_txome_{chr}.Rout"
+    threads:
+        1
+    envmodules:
+        f"{Rmod}"
+    shell:
+        '''
+        {Rbin} "--args genomein='{input.genome}' genomeout='{output.genome}' txomein='{input.txome}' txomeout='{output.txome}' chrnameout='{output.chrnames}' gtfin='{input.gtf}' coordkeep='{params.coordkeep}'" {input.script} {params.rout}
+        '''
+
 ## -----------------------------------------------------------------------------
 ## Quantify with Salmon
 ## -----------------------------------------------------------------------------
@@ -250,6 +277,26 @@ rule run_salmon:
         r2 = "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq.gz"
     output:
         quant = "{simtype}/2_quants/salmon/sample{i}/quant.sf"
+    params:
+        idxdir = lambda wildcards, input: os.path.dirname(input["idx"]),
+        outdir = lambda wildcards, output: os.path.dirname(output["quant"])
+    threads:
+        16
+    envmodules:
+        f"{Salmonmod}"
+    shell:
+        '''
+        salmon quant --index {params.idxdir} --libType A -1 {input.r1} -2 {input.r2} \
+        --threads {threads} --output {params.outdir} --dumpEq --numGibbsSamples 30
+        '''
+
+rule run_salmon_subset:
+    input:
+        idx = "reference/gencode.v41.annotation.protein_coding.expanded_chr22_1_35000000.k31.sidx/info.json",
+        r1 = "{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz",
+        r2 = "{simtype}/1_reads/reads/sample{i}/sample{i}_2.fq.gz"
+    output:
+        quant = "{simtype}/2_quants/salmon_chr22_1_35000000/sample{i}/quant.sf"
     params:
         idxdir = lambda wildcards, input: os.path.dirname(input["idx"]),
         outdir = lambda wildcards, output: os.path.dirname(output["quant"])
