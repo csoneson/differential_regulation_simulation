@@ -17,6 +17,7 @@ print(library_size)
 print(nbr_diff_reg)
 print(nbr_diff_spliced)
 print(nbr_diff_expr)
+print(diff_expr_fold_change_offset)
 
 ## -----------------------------------------------------------------------------
 ## Read file with mean/dispersion relationship
@@ -66,7 +67,7 @@ gene_summary$gene_de_status <- 0
 ## Generate fold changes if there are differentially expressed genes
 if (nbr_diff_expr > 0) {
     set.seed(seed)
-    fold_changes <- (2 + rexp(nbr_diff_expr, 
+    fold_changes <- (diff_expr_fold_change_offset + rexp(nbr_diff_expr, 
                               rate = 1))^(c(-1, 1)[round(runif(nbr_diff_expr)) + 1])
     
     diff_expr_genes <- sample(1:nrow(gene_summary), nbr_diff_expr, replace = FALSE)
