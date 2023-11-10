@@ -18,6 +18,7 @@ print(nbr_diff_reg)
 print(nbr_diff_spliced)
 print(nbr_diff_expr)
 print(diff_expr_fold_change_offset)
+print(nbr_dr_batch)
 
 ## -----------------------------------------------------------------------------
 ## Read file with mean/dispersion relationship
@@ -219,6 +220,15 @@ if (nbr_diff_spliced > 0) {
 ## Introduce differential regulation (swap the s*_IsoPct between -U and non-U 
 ## isoforms for the samples in group 2)
 ## -----------------------------------------------------------------------------
+swap_IsoPct <- function(w, txid) {
+    wtmp <- w
+    for (i in grep("-U", txid)) {
+        wtmp[i] <- w[txid == sub("-U", "", txid[i])]
+        wtmp[txid == sub("-U", "", txid[i])] <- w[i]
+    }
+    wtmp
+}
+
 if (nbr_diff_reg > 0) {
     ## Extract genes with at least 1 unspliced isoform and expected count > 10
     message("Introducing differential regulation...")
@@ -233,15 +243,6 @@ if (nbr_diff_reg > 0) {
             nbr_diff_reg, replace = FALSE)]
     isoform_summary_nondr <- isoform_summary[!(isoform_summary$gene_id %in% dr_genes), ]
     isoform_summary_dr <- isoform_summary[isoform_summary$gene_id %in% dr_genes, ]
-    
-    swap_IsoPct <- function(w, txid) {
-        wtmp <- w
-        for (i in grep("-U", txid)) {
-            wtmp[i] <- w[txid == sub("-U", "", txid[i])]
-            wtmp[txid == sub("-U", "", txid[i])] <- w[i]
-        }
-        wtmp
-    }
     
     isoform_summary_dr <- isoform_summary_dr %>% group_by(gene_id) %>%
         mutate(s4_IsoPct = swap_IsoPct(s4_IsoPct, transcript_id),
@@ -262,6 +263,41 @@ if (nbr_diff_reg > 0) {
     isoform_summary <- isoform_summary %>% group_by(gene_id) %>%
         mutate(gene_dr_status = 0,
                transcript_dr_status = 0) %>%
+        dplyr::ungroup()
+}
+
+## -----------------------------------------------------------------------------
+## Introduce differential regulation between batches (swap the s*_IsoPct 
+## between -U and non-U isoforms for the samples in batch 2)
+## -----------------------------------------------------------------------------
+if (nbr_dr_batch > 0) {
+    ## Extract genes with at least 1 unspliced isoform
+    message("Introducing DR batch effect...")
+    batch_genes <- 
+        gene_summary$gene_id[sample(which(gene_summary$nbr_unspliced_isoforms >= 1), 
+                                    nbr_dr_batch, replace = FALSE)]
+    isoform_summary_nonbatch <- isoform_summary[!(isoform_summary$gene_id %in% batch_genes), ]
+    isoform_summary_batch <- isoform_summary[isoform_summary$gene_id %in% batch_genes, ]
+    
+    isoform_summary_batch <- isoform_summary_batch %>% group_by(gene_id) %>%
+        mutate(s1_IsoPct = swap_IsoPct(s1_IsoPct, transcript_id),
+               s2_IsoPct = swap_IsoPct(s2_IsoPct, transcript_id),
+               s4_IsoPct = swap_IsoPct(s4_IsoPct, transcript_id),
+               gene_dr_batch_status = 1,
+               transcript_dr_batch_status = as.numeric(sub("-U-U", "-U", paste0(transcript_id, "-U")) %in%
+                                                           transcript_id)) %>%
+        dplyr::ungroup()
+    
+    isoform_summary_nonbatch <- isoform_summary_nonbatch %>% group_by(gene_id) %>%
+        mutate(gene_dr_batch_status = 0,
+               transcript_dr_batch_status = 0) %>%
+        dplyr::ungroup()
+    
+    isoform_summary <- dplyr::bind_rows(isoform_summary_nonbatch, isoform_summary_batch)
+} else {
+    isoform_summary <- isoform_summary %>% group_by(gene_id) %>%
+        mutate(gene_dr_batch_status = 0,
+               transcript_dr_batch_status = 0) %>%
         dplyr::ungroup()
 }
 

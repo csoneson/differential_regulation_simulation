@@ -30,11 +30,15 @@ Rbin = "R CMD BATCH --no-restore --no-save"
 
 ## -----------------------------------------------------------------------------
 ## Enumerate simulations to do
-## Format: de{nde}_ds{nds}_dr{ndr}, where {nde}, {nds}, {ndr} are the number of 
-## genes affected by differential expression/splicing/regulation, respectively
+## Format: de{nde}_ds{nds}_dr{ndr}_drbatch{ndrbatch}_off{offset}, 
+## where {nde}, {nds}, {ndr} are the number of 
+## genes affected by differential expression/splicing/regulation, respectively,
+## {ndrbatch} is the number of genes affected by batch, and {offset} determines
+## the fold change for the DE genes.
 ## -----------------------------------------------------------------------------
-sims = ["de0_ds0_dr0_off2", "de0_ds0_dr2000_off2", "de2000_ds0_dr2000_off2", "de0_ds2000_dr2000_off2"]
-simsadd = ["de2000_ds0_dr2000_off5", "de2000_ds0_dr2000_off8"]
+sims = ["de0_ds0_dr0_drbatch0_off2", "de0_ds0_dr2000_drbatch0_off2", "de2000_ds0_dr2000_drbatch0_off2", "de0_ds2000_dr2000_drbatch0_off2"]
+simsadd = ["de2000_ds0_dr2000_drbatch0_off5", "de2000_ds0_dr2000_drbatch0_off8"]
+simsbatch = ["de0_ds0_dr2000_drbatch2000_off2"]
 
 ## -----------------------------------------------------------------------------
 ##  Default rule
@@ -57,7 +61,7 @@ rule all:
         ## Generate small example data set
         "reference/gencode.v41.annotation.protein_coding.expanded.transcripts_chr22_1_35000000.fa",
         "reference/gencode.v41.annotation.protein_coding.expanded_chr22_1_35000000.k31.sidx/info.json",
-        expand("{simtype}/2_quants/salmon_chr22_1_35000000/sample{i}/quant.sf", simtype = ["de0_ds0_dr2000_off2"], i = ["1","2","3","4","5","6"]),
+        expand("{simtype}/2_quants/salmon_chr22_1_35000000/sample{i}/quant.sf", simtype = ["de0_ds0_dr2000_drbatch0_off2"], i = ["1","2","3","4","5","6"]),
 
 ## Additional simulations with higher DE logFCs
 rule addsim:
@@ -65,6 +69,13 @@ rule addsim:
         expand("Rout/generate_rsem_files_{simtype}.Rout", simtype = simsadd),
         expand("{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz", simtype = simsadd, i = ["1","2","3","4","5","6"]),
         expand("{simtype}/2_quants/salmon/sample{i}/quant.sf", simtype = simsadd, i = ["1","2","3","4","5","6"]),
+
+## Additional simulations with batch effect
+rule batchsim:
+    input:
+        expand("Rout/generate_rsem_files_{simtype}.Rout", simtype = simsbatch),
+        expand("{simtype}/1_reads/reads/sample{i}/sample{i}_1.fq.gz", simtype = simsbatch, i = ["1","2","3","4","5","6"]),
+        expand("{simtype}/2_quants/salmon/sample{i}/quant.sf", simtype = simsbatch, i = ["1","2","3","4","5","6"]),
 
 ## -----------------------------------------------------------------------------
 ##  Download data
@@ -172,24 +183,25 @@ rule generate_simulation_parameters:
         isoformResultsFile = "reference/rsem_model/SRR493366.isoforms.results",
         script = "../scripts/generate_rsem_files.R"
     output:
-        expand("de{{nde}}_ds{{nds}}_dr{{ndr}}_off{{offset}}/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
-        "de{nde}_ds{nds}_dr{ndr}_off{offset}/3_truth/simulation_details.txt",
-        rout = "Rout/generate_rsem_files_de{nde}_ds{nds}_dr{ndr}_off{offset}.Rout"
+        expand("de{{nde}}_ds{{nds}}_dr{{ndr}}_drbatch{{ndrbatch}}_off{{offset}}/1_reads/rsem_files/sample{i}.txt", i=["1","2","3","4","5","6"]),
+        "de{nde}_ds{nds}_dr{ndr}_drbatch{ndrbatch}_off{offset}/3_truth/simulation_details.txt",
+        rout = "Rout/generate_rsem_files_de{nde}_ds{nds}_dr{ndr}_drbatch{ndrbatch}_off{offset}.Rout"
     params:
         seed = 123,
         nbrPerGroup = 3,
         meanDispFile = "reference/Pickrell.Cheung.Mu.Phi.Estimates.rds",
-        outdirBase = lambda wildcards: "de" + wildcards.nde + "_ds" + wildcards.nds + "_dr" + wildcards.ndr + "_off" + wildcards.offset,
+        outdirBase = lambda wildcards: "de" + wildcards.nde + "_ds" + wildcards.nds + "_dr" + wildcards.ndr + "_drbatch" + wildcards.ndrbatch + "_off" + wildcards.offset,
         librarySize = 40000000,
         nbrDiffReg = lambda wildcards: wildcards.ndr,
         nbrDiffSpliced = lambda wildcards: wildcards.nds,
         nbrDiffExpr = lambda wildcards: wildcards.nde,
+        nbrDRBatch = lambda wildcards: wildcards.ndrbatch,
         fcOffset = lambda wildcards: wildcards.offset
     envmodules:
         f"{Rmod}"
     shell:
         '''
-        {Rbin} "--args seed={params.seed} isoform_results_file='{input.isoformResultsFile}' nbr_per_group={params.nbrPerGroup} mean_disp_file='{params.meanDispFile}' outdir_base='{params.outdirBase}' library_size={params.librarySize} nbr_diff_reg={params.nbrDiffReg} nbr_diff_spliced={params.nbrDiffSpliced} nbr_diff_expr={params.nbrDiffExpr} diff_expr_fold_change_offset={params.fcOffset}" {input.script} {output.rout}
+        {Rbin} "--args seed={params.seed} isoform_results_file='{input.isoformResultsFile}' nbr_per_group={params.nbrPerGroup} mean_disp_file='{params.meanDispFile}' outdir_base='{params.outdirBase}' library_size={params.librarySize} nbr_diff_reg={params.nbrDiffReg} nbr_diff_spliced={params.nbrDiffSpliced} nbr_diff_expr={params.nbrDiffExpr} diff_expr_fold_change_offset={params.fcOffset} nbr_dr_batch={params.nbrDRBatch}" {input.script} {output.rout}
         '''
 
 ## -----------------------------------------------------------------------------
